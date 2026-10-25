@@ -1,5 +1,7 @@
 # Remote SWE Agents
 
+Last updated: Sun Oct 25 2026
+
 English | [日本語](README_ja.md)
 
 This is an example implementation of a fully autonomous software development AI agent. The agent works in its own dedicated development environment, freeing you from being tied to your laptop!

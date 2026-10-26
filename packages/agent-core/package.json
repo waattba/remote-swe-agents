@@ -41,7 +41,7 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node ../../scripts/add-esm-extensions.mjs dist",
     "watch": "tsc -w",
     "test": "vitest run",
     "format": "prettier --write \"src/**/*.ts\"",

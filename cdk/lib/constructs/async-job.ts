@@ -57,6 +57,14 @@ export class AsyncJob extends Construct {
       })
     );
 
+    // Allow the async job handler to query its own CloudWatch Logs for debugging
+    handler.addToRolePolicy(
+      new PolicyStatement({
+        actions: ['logs:FilterLogEvents', 'logs:DescribeLogStreams'],
+        resources: [handler.logGroup.logGroupArn],
+      })
+    );
+
     new CfnOutput(this, 'HandlerArn', { value: handler.functionArn });
     this.handler = handler;
 

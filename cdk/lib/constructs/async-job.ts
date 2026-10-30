@@ -31,9 +31,9 @@ export class AsyncJob extends Construct {
     });
 
     const handler = new DockerImageFunction(this, 'Handler', {
-      // Use a CommonJS wrapper (handler.cjs) that properly loads the ESM async-job-runner.mjs
-      // This wrapper handles dynamic import of the ESM module and delegates invocations to it.
-      code: image.toLambdaDockerImageCode({ cmd: ['handler.cjs'] }),
+      // Use an ESM wrapper (handler.mjs) that re-exports the ESM async-job-runner.mjs
+      // Node.js 22 Lambda runtime is ESM-first and can't load CommonJS modules as entry points
+      code: image.toLambdaDockerImageCode({ cmd: ['handler.mjs'] }),
       memorySize: 256,
       timeout: Duration.minutes(10),
       architecture: Architecture.ARM_64,

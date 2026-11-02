@@ -31,6 +31,11 @@ import type { PortMapping } from '@/lib/port-url-transform';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+// Disable fetch cache to ensure fresh data on every navigation.
+// force-dynamic + revalidate = 0 ensures server-side rendering,
+// but fetchCache = 'force-no-store' is needed to prevent Next.js
+// from caching the RSC payload on the client side between navigations.
+export const fetchCache = 'force-no-store';
 
 export default async function SessionPage({ params }: { params: Promise<{ workerId: string }> }) {
   const { workerId } = await params;

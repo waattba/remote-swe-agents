@@ -5,7 +5,7 @@ import { bedrockStrandsAgentLoop } from '../bedrock-strands-agent-loop';
  * Bedrock backend. Routes turns through the Strands-Agent-based
  * {@link bedrockStrandsAgentLoop} (Converse API via `@strands-agents/bedrock`).
  */
-export class BedrockBackend implements InferenceBackend {
+class BedrockBackend implements InferenceBackend {
   readonly kind = 'bedrock' as const;
 
   async runTurn(ctx: TurnContext, sink: ToolEventSink): Promise<TurnResult> {

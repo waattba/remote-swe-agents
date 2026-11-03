@@ -17,7 +17,7 @@ const sanitizeToolName = (name: string): string => name.replace(/[^a-zA-Z0-9_-]/
  * preventing the forceReport mechanism from firing unnecessarily
  * (especially in child sessions that primarily use agent-to-agent communication).
  */
-export const toolNamesThatResetReportTimer = new Set([
+const toolNamesThatResetReportTimer = new Set([
   sanitizeToolName(reportProgressTool.name),
   sanitizeToolName(sendToAgentTool.name),
   sanitizeToolName(acknowledgeAgentTool.name),
@@ -59,11 +59,11 @@ export const normalizeMcpImageFormat = (mimeType: string | undefined): 'png' | '
 /**
  * Check whether the given tool name should reset the lastReportedTime.
  */
-export const shouldResetReportTimer = (toolName: string | undefined): boolean => {
+const shouldResetReportTimer = (toolName: string | undefined): boolean => {
   return toolName != null && toolNamesThatResetReportTimer.has(sanitizeToolName(toolName));
 };
 
-export interface InferenceModeContext {
+interface InferenceModeContext {
   sessionInferenceMode?: InferenceMode;
   customAgentInferenceMode?: InferenceMode;
   envInferenceMode?: string;

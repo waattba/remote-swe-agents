@@ -1,4 +1,4 @@
-import { validateApiKeyMiddleware } from '../auth/api-key';
+import { authenticateApiKey } from '../auth/api-key';
 import { NextRequest, NextResponse } from 'next/server';
 import { createSession } from '@remote-swe-agents/agent-core/lib';
 import { z } from 'zod';
@@ -11,11 +11,14 @@ const createSessionSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  // Validate API key
-  const apiKeyValidation = await validateApiKeyMiddleware(request);
-  if (apiKeyValidation) {
-    return apiKeyValidation;
+  // Authenticate and get sender info
+  const auth = await authenticateApiKey(request);
+  if (!auth.ok) {
+    return auth.response;
   }
+
+  // Use ownerId if available, otherwise use the api key id
+  const userId = auth.sender.ownerId ?? auth.sender.id;
 
   // Parse and validate request body
   const body = await request.json();
@@ -29,8 +32,11 @@ export async function POST(request: NextRequest) {
 
   const workerId = await createSession({
     message,
-    initiator: `rest#`,
+    initiator: `rest#${userId}`,
     modelOverride,
+    senderUserId: userId,
+    senderType: 'webapp',
+    senderDisplayName: auth.sender.displayName,
   });
 
   return NextResponse.json({ sessionId: workerId }, { status: 201 });

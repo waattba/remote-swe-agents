@@ -14,12 +14,20 @@ import {
 import { updateAgentStatusWithEvent } from './common/status';
 import { refreshSession } from './common/refresh-session';
 import { notifyTermination } from './common/notify-termination';
+import {
+  logSessionStart,
+  logSessionResume,
+  logSessionTerminated,
+  logSessionError,
+  logSecurityError,
+} from '@remote-swe-agents/agent-core/lib/security-logger.js';
 
 Object.assign(global, { WebSocket: require('ws') });
 
 const notifyOwnerOnError = async (workerId: string, error: unknown) => {
-  const msg = error instanceof Error ? error.message : String(error);
-  await notifyTermination(workerId, 'error', msg);
+  // Sanitize error message to prevent information disclosure
+  const sanitizedMsg = error instanceof Error ? error.message : 'An internal error occurred';
+  await notifyTermination(workerId, 'error', sanitizedMsg);
 };
 
 const eventHttpEndpoint = process.env.EVENT_HTTP_ENDPOINT!;
@@ -58,7 +66,7 @@ class ConverseSessionTracker {
 
   private enqueue(operation: () => Promise<void>): void {
     this.operationQueue = this.operationQueue.then(operation).catch((e) => {
-      console.log('Operation queue error:', e);
+      console.error('[entry] Operation queue error:', e);
     });
   }
 
@@ -89,14 +97,22 @@ class ConverseSessionTracker {
     const restartToken = pauseKillTimer();
     session.promise = onMessageReceived(this.workerId, session.cancellationToken)
       .catch(async (e) => {
-        const errorText = `An error occurred: ${e}`;
-        console.log(e);
+        // Log full error details for debugging
+        console.error('[entry] onMessageReceived error:', e);
+        logSessionError(this.workerId, e, 'onMessageReceived');
+
+        // Sanitize error message for user display to prevent info disclosure
+        const sanitizedError = e instanceof Error ? `${e.name}: ${e.message}` : 'An internal error occurred';
+        const errorText = `An error occurred: ${sanitizedError}`;
         // Safety net: reset agentStatus to 'pending' if onMessageReceived
         // rejects (e.g. its own finally block threw a DDB error before the
         // status update could complete). Without this, the session stays
         // stuck in 'working' permanently.
         updateAgentStatusWithEvent(this.workerId, 'pending').catch((statusErr) => {
           console.error('[entry] safety-net agentStatus reset failed:', statusErr);
+          logSecurityError(this.workerId, 'agent_status_reset', statusErr, {
+            context: 'safety-net onMessageReceived',
+          });
         });
         try {
           const saved = await saveConversationHistory(
@@ -107,9 +123,14 @@ class ConverseSessionTracker {
           );
           await sendSystemMessage(this.workerId, errorText, false, false, saved.SK);
         } catch (sendErr) {
-          console.log(sendErr);
+          console.error('[entry] Failed to send error notification:', sendErr);
+          logSecurityError(this.workerId, 'send_error_message', sendErr, {
+            context: 'onMessageReceived error handler',
+          });
         }
-        notifyOwnerOnError(this.workerId, e).catch(() => {});
+        notifyOwnerOnError(this.workerId, e).catch((notifyErr) => {
+          console.error('[entry] Failed to notify on error:', notifyErr);
+        });
       })
       .finally(() => {
         session.isFinished = true;
@@ -123,11 +144,19 @@ class ConverseSessionTracker {
     const restartToken = pauseKillTimer();
     session.promise = resume(this.workerId, session.cancellationToken)
       .catch(async (e) => {
-        const errorText = `An error occurred: ${e}`;
-        console.log(e);
+        // Log full error details for debugging
+        console.error('[entry] resume error:', e);
+        logSessionError(this.workerId, e, 'resume');
+
+        // Sanitize error message for user display
+        const sanitizedError = e instanceof Error ? `${e.name}: ${e.message}` : 'An internal error occurred';
+        const errorText = `An error occurred: ${sanitizedError}`;
         // Safety net: reset agentStatus to 'pending' if resume rejects.
         updateAgentStatusWithEvent(this.workerId, 'pending').catch((statusErr) => {
           console.error('[entry] safety-net agentStatus reset failed:', statusErr);
+          logSecurityError(this.workerId, 'agent_status_reset', statusErr, {
+            context: 'safety-net resume',
+          });
         });
         try {
           const saved = await saveConversationHistory(
@@ -138,9 +167,14 @@ class ConverseSessionTracker {
           );
           await sendSystemMessage(this.workerId, errorText, false, false, saved.SK);
         } catch (sendErr) {
-          console.log(sendErr);
+          console.error('[entry] Failed to send error notification:', sendErr);
+          logSecurityError(this.workerId, 'send_error_message', sendErr, {
+            context: 'resume error handler',
+          });
         }
-        notifyOwnerOnError(this.workerId, e).catch(() => {});
+        notifyOwnerOnError(this.workerId, e).catch((notifyErr) => {
+          console.error('[entry] Failed to notify on error:', notifyErr);
+        });
       })
       .finally(() => {
         session.isFinished = true;
@@ -237,6 +271,7 @@ export const main = async (workerId: string) => {
 
   isStarted[workerId] = true;
   setActiveWorkerId(workerId);
+  logSessionStart(workerId);
   const tracker = new ConverseSessionTracker(workerId);
   setCancelActiveTokens(() => tracker.cancelAllTokens());
 
@@ -245,7 +280,7 @@ export const main = async (workerId: string) => {
     next: (data) => {
       console.log('received broadcast', data);
     },
-    error: (err) => console.log(err),
+    error: (err) => console.error('[entry] broadcast subscription error:', err),
   });
 
   const unicast = await events.connect(`/event-bus/worker/${workerId}`);
@@ -262,6 +297,7 @@ export const main = async (workerId: string) => {
         tracker.startOnMessageReceived();
       } else if (type == 'forceStop') {
         tracker.forceStop(async () => {
+          logSessionTerminated(workerId, 'forceStop');
           // Update agent status to pending after force stop
           await updateAgentStatusWithEvent(workerId, 'pending');
           const feedbackText = 'Agent work was stopped.';
@@ -277,7 +313,7 @@ export const main = async (workerId: string) => {
         await refreshSession(workerId);
       }
     },
-    error: (err) => console.log(err),
+    error: (err) => console.error('[entry] unicast subscription error:', err),
   });
 
   setKillTimer(workerId);
@@ -286,10 +322,16 @@ export const main = async (workerId: string) => {
     // Update instance status to "running" in DynamoDB
     await updateInstanceStatus(workerId, 'running');
 
+    logSessionResume(workerId);
     tracker.startResume();
   } catch (e) {
-    const errorText = `An error occurred: ${e}`;
-    console.log(e);
+    // Log full error details for debugging
+    console.error('[entry] main initialization error:', e);
+    logSessionError(workerId, e, 'main');
+
+    // Sanitize error message for user display
+    const sanitizedError = e instanceof Error ? `${e.name}: ${e.message}` : 'An internal error occurred';
+    const errorText = `An error occurred: ${sanitizedError}`;
     try {
       const saved = await saveConversationHistory(
         workerId,
@@ -299,7 +341,10 @@ export const main = async (workerId: string) => {
       );
       await sendSystemMessage(workerId, errorText, false, false, saved.SK);
     } catch (sendErr) {
-      console.log(sendErr);
+      console.error('[entry] Failed to send error notification:', sendErr);
+      logSecurityError(workerId, 'send_error_message', sendErr, {
+        context: 'main error handler',
+      });
     }
     await notifyOwnerOnError(workerId, e);
   }
